@@ -4,6 +4,9 @@ import React, { useState, useEffect } from 'react';
 import { Stethoscope, Send, Loader2, AlertTriangle, History, Activity, Mic, MicOff } from 'lucide-react';
 import ResultCard from '@/components/ResultCard';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY as string });
 
 interface DiagnosisResult {
   likelyDisease: string;
@@ -49,9 +52,9 @@ export default function RapidHealthPage() {
       console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed') {
         alert('Microphone access is blocked. Please ensure you have granted permission and that you are not in a restricted iframe. Try opening the app in a new tab if the issue persists.');
-      } else if (event.error === 'no-speech') {
-        // Silent fail for no-speech, just reset the state
-        console.warn('No speech detected.');
+      } else if (event.error === 'no-speech' || event.error === 'aborted') {
+        // Silent fail for no-speech or aborted, just reset the state
+        console.warn(`Speech recognition ${event.error}.`);
       } else {
         alert(`Speech recognition error: ${event.error}`);
       }
@@ -74,15 +77,46 @@ export default function RapidHealthPage() {
     setOutbreakAlert(null);
 
     try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ age, symptoms, duration }),
+      const prompt = `
+        You are a medical diagnostic assistant for Community Health Volunteers in rural areas.
+        Analyze the following patient data and provide a diagnosis:
+        Age: ${age}
+        Symptoms: ${symptoms}
+        Duration of illness: ${duration}
+
+        Return the response in JSON format with the following fields:
+        - likelyDisease: (string)
+        - riskLevel: (string: "Low", "Medium", or "High")
+        - keySigns: (array of strings)
+        - immediateAction: (string)
+        - urgentReferral: (boolean)
+
+        Be concise and professional.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              likelyDisease: { type: Type.STRING },
+              riskLevel: { type: Type.STRING },
+              keySigns: { type: Type.ARRAY, items: { type: Type.STRING } },
+              immediateAction: { type: Type.STRING },
+              urgentReferral: { type: Type.BOOLEAN },
+            },
+            required: ["likelyDisease", "riskLevel", "keySigns", "immediateAction", "urgentReferral"],
+          },
+        },
       });
 
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-
+      if (!response.text) {
+        throw new Error('No response text from Gemini');
+      }
+      const data = JSON.parse(response.text);
       setResult(data);
       setHistory(prev => [data, ...prev]);
     } catch (error) {
