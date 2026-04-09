@@ -1,0 +1,5 @@
+{
+  "name": "RapidHealth AI",
+  "description": "A hackathon-ready AI-powered diagnostic and outbreak monitoring tool for Community Health Volunteers.",
+  "requestFramePermissions": ["microphone"]
+}
